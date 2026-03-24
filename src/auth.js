@@ -54,7 +54,10 @@ function getXsrfToken(cookies) {
 }
 
 /**
- * Check if the current cookies are still valid
+ * Check if the current cookies are still valid.
+ *
+ * Security: Cookies are only sent to the whitelisted Tencent Docs domain
+ * (docs.qq.com) to prevent potential credential exfiltration.
  */
 async function isCookieValid(cookies) {
   if (!cookies || !Array.isArray(cookies) || cookies.length === 0) return false;
@@ -63,9 +66,18 @@ async function isCookieValid(cookies) {
   const xsrf = getXsrfToken(cookies);
   if (!xsrf) return false;
 
+  // Security: Validate that the target URL is within the allowed domain whitelist
+  const targetUrl = `${LOGIN_CHECK_URL}?xsrf=${xsrf}`;
+  const allowedDomains = ['docs.qq.com'];
+  const parsedUrl = new URL(targetUrl);
+  if (!allowedDomains.includes(parsedUrl.hostname)) {
+    console.error(`Security: Blocked cookie transmission to unauthorized domain: ${parsedUrl.hostname}`);
+    return false;
+  }
+
   try {
     const resp = await axios.post(
-      `${LOGIN_CHECK_URL}?xsrf=${xsrf}`,
+      targetUrl,
       {},
       {
         headers: {

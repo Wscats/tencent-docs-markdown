@@ -7,45 +7,36 @@
  * Usage: node src/login-with-polling.js
  */
 
-const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { loadCookies, isCookieValid, getCookieString, COOKIE_FILE } = require('./auth');
+const { loadCookies, isCookieValid, getCookieString, loginWithQRCode, COOKIE_FILE } = require('./auth');
 
 const POLL_INTERVAL = 10000; // 10 seconds
 const MAX_POLLS = 18; // 18 * 10s = 180s max wait time
 
 let pollCount = 0;
-let loginProcess = null;
 let pollTimer = null;
 let loginSucceeded = false;
 
 /**
- * Start the auth.js login process as a child process
+ * Start the auth.js login process by directly calling the exported function.
+ * This avoids spawning a child process (no child_process usage).
  */
 function startLoginProcess() {
   console.log('🚀 Starting QR code login process...');
   console.log('   A browser window will open shortly. Please scan the QR code.\n');
 
-  loginProcess = spawn('node', [path.join(__dirname, 'auth.js')], {
-    cwd: path.join(__dirname, '..'),
-    stdio: 'inherit', // Show login process output in console
-    detached: false,
-  });
-
-  loginProcess.on('error', (err) => {
-    console.error(`❌ Failed to start login process: ${err.message}`);
-    cleanup(1);
-  });
-
-  loginProcess.on('exit', (code) => {
-    if (code === 0) {
-      console.log('\n✅ Login process exited successfully.');
-    } else if (!loginSucceeded) {
-      console.log(`\n⚠️  Login process exited with code: ${code}`);
-    }
-    loginProcess = null;
-  });
+  // Call loginWithQRCode directly instead of spawning a child process
+  loginWithQRCode()
+    .then((cookies) => {
+      loginSucceeded = true;
+      console.log('\n✅ Login process completed successfully.');
+    })
+    .catch((err) => {
+      if (!loginSucceeded) {
+        console.error(`❌ Login process failed: ${err.message}`);
+      }
+    });
 }
 
 /**
@@ -135,13 +126,6 @@ function cleanup(exitCode = 0) {
   if (pollTimer) {
     clearInterval(pollTimer);
     pollTimer = null;
-  }
-  if (loginProcess && !loginProcess.killed) {
-    try {
-      loginProcess.kill('SIGTERM');
-    } catch {
-      // Process may have already exited
-    }
   }
   process.exit(exitCode);
 }

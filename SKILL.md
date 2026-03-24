@@ -1,14 +1,14 @@
 ---
 name: tencent-docs-markdown
 license: MIT
-description: 腾讯文档 Markdown 技能，支持新建文档并写入内容、下载、删除、读取、更新、重命名等操作。
+description: 腾讯文档 Markdown 技能，支持新建 Markdown 并写入内容、下载、删除、读取、更新、重命名等操作。
 ---
 
 # 腾讯文档 Markdown 技能
 
 > **名称：** `tencent-docs-markdown`
 > **许可证：** MIT
-> **简介：** 腾讯文档 Markdown 技能，支持新建文档并写入内容、下载、删除、读取、更新、重命名等操作。
+> **简介：** 腾讯文档 Markdown 技能，支持新建 Markdown 并写入内容、下载、删除、读取、更新、重命名等操作。
 
 ---
 
