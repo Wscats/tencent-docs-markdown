@@ -86,10 +86,20 @@ async function isCookieValid(cookies) {
 
 /**
  * Login via QR code scanning using Puppeteer
- * Opens a browser window for the user to scan the QR code with WeChat/QQ
+ * Opens a browser window for the user to scan the QR code with WeChat/QQ.
+ *
+ * Uses a 10-second polling mechanism to detect page changes:
+ * - Every 10 seconds, capture a snapshot of the current page state (URL, title, body text, etc.)
+ * - Compare with the previous snapshot to detect if the page has fully changed
+ * - If a significant change is detected, check whether login has completed
+ * - If login is detected, extract cookies from the browser and validate them
+ * - If cookies are valid, save them and complete the login process
  */
 async function loginWithQRCode() {
   const spinner = ora('Launching browser for QR code login...').start();
+
+  const POLL_INTERVAL = 10000; // 10 seconds
+  const MAX_POLLS = 30; // 30 * 10s = 300s (5 min) max wait
 
   let browser;
   try {
@@ -165,163 +175,200 @@ async function loginWithQRCode() {
       if (candidates.length > 0) candidates[0].el.click();
     });
 
-    // Wait for QR code iframe to load
+    // Wait for QR code page to fully load
     spinner.text = 'Waiting for QR code to appear...';
-    let qrIframe = null;
     try {
       await page.waitForSelector('iframe[src*="xlogin"], iframe[src*="weixin"]', { timeout: 15000 });
       await new Promise((resolve) => setTimeout(resolve, 3000));
-      qrIframe = await page.$('iframe[src*="xlogin"], iframe[src*="weixin"]');
     } catch {
-      // QR code may not need iframe detection
+      // QR code may appear without iframe
       await new Promise((resolve) => setTimeout(resolve, 5000));
     }
 
     spinner.stop();
     console.log(chalk.yellow('\n📱 Please scan the QR code in the browser window to log in.'));
-    console.log(chalk.gray('   Waiting for QR code to be scanned...\n'));
+    console.log(chalk.gray('   Polling every 10s to detect login status...\n'));
 
-    // Phase 1: Wait for "扫描成功" (scan success) message to appear
-    // This indicates the user has scanned the QR code but hasn't confirmed yet
-    const scanSpinner = ora('Waiting for QR code scan...').start();
-    let scanSuccessDetected = false;
+    // ──────────────────────────────────────────────────
+    //  10-second Polling: detect page change → check login → get cookies
+    // ──────────────────────────────────────────────────
 
-    try {
-      await page.waitForFunction(
-        () => {
-          // Check in the main page
-          const bodyText = document.body.innerText || '';
-          if (bodyText.includes('扫描成功') || bodyText.includes('扫码成功')) {
-            return true;
-          }
-          // Check inside iframes (WeChat login iframe)
-          const iframes = document.querySelectorAll('iframe');
-          for (const iframe of iframes) {
-            try {
-              const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-              if (iframeDoc) {
-                const iframeText = iframeDoc.body?.innerText || '';
-                if (iframeText.includes('扫描成功') || iframeText.includes('扫码成功')) {
-                  return true;
-                }
-              }
-            } catch {
-              // Cross-origin iframe, skip
-            }
-          }
-          return false;
-        },
-        { timeout: 300000, polling: 1000 }
-      );
-      scanSuccessDetected = true;
-      scanSpinner.succeed(chalk.green('QR code scanned! Waiting for WeChat confirmation...'));
-    } catch {
-      // If we can't detect scan success text, it might be a cross-origin iframe
-      // Try to detect it via iframe content changes instead
-      scanSpinner.text = 'Detecting scan status via QR code area...';
-
-      if (qrIframe) {
-        try {
-          // Monitor the QR code iframe area for visual changes
-          // When scanned, the QR code area content changes (shows success message)
-          await page.waitForFunction(
-            (iframeSelector) => {
-              const iframe = document.querySelector(iframeSelector);
-              if (!iframe) return false;
-              const rect = iframe.getBoundingClientRect();
-              // If iframe is hidden or removed, login may have completed
-              if (rect.width === 0 || rect.height === 0) return true;
-              // Check if the iframe src changed (indicates state change)
-              const src = iframe.getAttribute('src') || '';
-              if (src.includes('scanning') || src.includes('confirm')) return true;
-              return false;
-            },
-            { timeout: 300000, polling: 1000 },
-            'iframe[src*="xlogin"], iframe[src*="weixin"]'
+    /**
+     * Capture a snapshot of the current page state for comparison
+     */
+    async function capturePageSnapshot() {
+      try {
+        return await page.evaluate(() => {
+          const bodyText = (document.body.innerText || '').substring(0, 2000);
+          const iframeCount = document.querySelectorAll('iframe').length;
+          const hasQrIframe = !!document.querySelector('iframe[src*="xlogin"], iframe[src*="weixin"]');
+          const hasAvatar = !!document.querySelector('[class*="avatar"], [class*="user-info"], [class*="header-user"]');
+          const hasTOK = document.cookie.includes('TOK=');
+          const modalVisible = !!document.querySelector(
+            '[class*="login-modal"], [class*="login-dialog"], [class*="login-panel"], [class*="compliance"]'
           );
-          scanSuccessDetected = true;
-          scanSpinner.succeed(chalk.green('Scan detected! Waiting for WeChat confirmation...'));
-        } catch {
-          scanSpinner.info(chalk.yellow('Could not detect scan status, continuing to wait for login...'));
-        }
-      } else {
-        scanSpinner.info(chalk.yellow('Could not detect scan status, continuing to wait for login...'));
+          return {
+            url: window.location.href,
+            title: document.title,
+            bodyTextHash: bodyText.length + ':' + bodyText.substring(0, 200),
+            iframeCount,
+            hasQrIframe,
+            hasAvatar,
+            hasTOK,
+            modalVisible,
+          };
+        });
+      } catch {
+        // Page may be navigating
+        return { url: '', title: '', bodyTextHash: '', iframeCount: 0, hasQrIframe: false, hasAvatar: false, hasTOK: false, modalVisible: false };
       }
     }
 
-    // Phase 2: Wait for user to confirm on WeChat (QR area turns white / login completes)
-    // After scanning, the user needs to tap "允许" in WeChat
-    const confirmSpinner = ora('Waiting for WeChat authorization (tap "允许" in WeChat)...').start();
+    /**
+     * Determine if the page has significantly changed compared to the baseline
+     */
+    function hasPageChanged(baseline, current) {
+      // URL changed (e.g., redirected after login)
+      if (baseline.url !== current.url) return true;
+      // Title changed significantly
+      if (baseline.title !== current.title) return true;
+      // QR code iframe disappeared (login completed)
+      if (baseline.hasQrIframe && !current.hasQrIframe) return true;
+      // Avatar appeared (user logged in)
+      if (!baseline.hasAvatar && current.hasAvatar) return true;
+      // TOK cookie appeared
+      if (!baseline.hasTOK && current.hasTOK) return true;
+      // Login modal disappeared
+      if (baseline.modalVisible && !current.modalVisible) return true;
+      // Body text changed significantly (page content fully changed)
+      if (baseline.bodyTextHash !== current.bodyTextHash) return true;
+      return false;
+    }
 
-    try {
-      await page.waitForFunction(
-        () => {
-          // Check 1: TOK cookie present means login is complete
-          if (document.cookie.includes('TOK=')) return true;
+    /**
+     * Check if the current page state indicates a successful login
+     */
+    function isLoginDetected(snapshot) {
+      // TOK cookie is present — strong signal
+      if (snapshot.hasTOK) return true;
+      // Avatar visible and QR iframe gone — user is logged in
+      if (snapshot.hasAvatar && !snapshot.hasQrIframe) return true;
+      // Redirected to desktop without login elements
+      if (snapshot.url.includes('/desktop') && !snapshot.hasQrIframe && !snapshot.modalVisible) return true;
+      return false;
+    }
 
-          // Check 2: URL changed to desktop (redirected after login)
-          if (window.location.href.includes('/desktop') && !window.location.href.includes('login')) {
-            const avatarEl = document.querySelector('[class*="avatar"], [class*="user-info"], [class*="header-user"]');
-            if (avatarEl) return true;
-          }
+    // Capture baseline snapshot (the QR code page before scanning)
+    const baselineSnapshot = await capturePageSnapshot();
+    console.log(chalk.gray(`   [Baseline] URL: ${baselineSnapshot.url}`));
+    console.log(chalk.gray(`   [Baseline] QR iframe: ${baselineSnapshot.hasQrIframe}, Modal: ${baselineSnapshot.modalVisible}\n`));
 
-          // Check 3: QR code iframe disappeared or became hidden (login completed)
-          const iframe = document.querySelector('iframe[src*="xlogin"], iframe[src*="weixin"]');
-          if (!iframe) {
-            // iframe removed means login flow completed
-            const notLogged = document.querySelector('[class*="not-logged"], [class*="login-btn"]');
-            if (!notLogged) return true;
-          } else {
-            const rect = iframe.getBoundingClientRect();
-            // iframe became invisible (QR area turned white/empty)
-            if (rect.width === 0 || rect.height === 0) return true;
-          }
+    const pollSpinner = ora('Polling login status every 10 seconds...').start();
+    let loginDetected = false;
+    let finalCookies = null;
 
-          // Check 4: Login dialog/modal disappeared
-          const loginModal = document.querySelector('[class*="login-modal"], [class*="login-dialog"], [class*="login-panel"]');
-          if (!loginModal) {
-            // No login modal visible and we had one before
-            const body = document.body.innerText || '';
-            if (!body.includes('扫描') && !body.includes('登录') && document.querySelector('[class*="avatar"]')) {
-              return true;
+    for (let poll = 1; poll <= MAX_POLLS; poll++) {
+      // Wait 10 seconds
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+
+      const elapsed = poll * (POLL_INTERVAL / 1000);
+      pollSpinner.text = `[Poll #${poll}] Checking page status... (${elapsed}s elapsed)`;
+
+      // Capture current page snapshot
+      const currentSnapshot = await capturePageSnapshot();
+
+      // Check if page has changed
+      const changed = hasPageChanged(baselineSnapshot, currentSnapshot);
+
+      if (changed) {
+        pollSpinner.info(
+          chalk.blue(`[Poll #${poll} - ${elapsed}s] Page change detected!`)
+        );
+
+        // Log what changed
+        if (baselineSnapshot.url !== currentSnapshot.url) {
+          console.log(chalk.gray(`   URL: ${baselineSnapshot.url} → ${currentSnapshot.url}`));
+        }
+        if (baselineSnapshot.hasQrIframe && !currentSnapshot.hasQrIframe) {
+          console.log(chalk.gray('   QR code iframe disappeared'));
+        }
+        if (!baselineSnapshot.hasAvatar && currentSnapshot.hasAvatar) {
+          console.log(chalk.gray('   User avatar appeared'));
+        }
+        if (!baselineSnapshot.hasTOK && currentSnapshot.hasTOK) {
+          console.log(chalk.gray('   TOK cookie detected'));
+        }
+        if (baselineSnapshot.bodyTextHash !== currentSnapshot.bodyTextHash) {
+          console.log(chalk.gray('   Page content changed'));
+        }
+
+        // Check if the change indicates login success
+        if (isLoginDetected(currentSnapshot)) {
+          console.log(chalk.green('\n   ✅ Login detected! Attempting to retrieve cookies...\n'));
+
+          // Give a little extra time for all cookies to settle
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+
+          // Retrieve cookies from the browser page
+          const cookies = await page.cookies();
+
+          if (cookies.length === 0) {
+            console.log(chalk.yellow('   ⚠️  No cookies retrieved yet, waiting a bit longer...'));
+            await new Promise((resolve) => setTimeout(resolve, 5000));
+            const retryCookies = await page.cookies();
+            if (retryCookies.length > 0) {
+              finalCookies = retryCookies;
             }
+          } else {
+            finalCookies = cookies;
           }
 
-          return false;
-        },
-        { timeout: 300000, polling: 2000 }
-      );
-      confirmSpinner.succeed(chalk.green('WeChat authorization confirmed! Login completing...'));
-    } catch (waitErr) {
-      confirmSpinner.fail(chalk.red('Timeout waiting for WeChat authorization.'));
-      throw new Error('Login timeout: WeChat authorization was not confirmed within the time limit.');
+          if (finalCookies && finalCookies.length > 0) {
+            console.log(chalk.gray(`   Retrieved ${finalCookies.length} cookies from browser`));
+
+            // Validate cookies by calling the API
+            console.log(chalk.gray('   Validating cookies against Tencent Docs API...'));
+            const valid = await isCookieValid(finalCookies);
+
+            if (valid) {
+              // Cookies are valid — save and complete login
+              saveCookies(finalCookies);
+              loginDetected = true;
+              console.log(chalk.green.bold('\n🎉 Login successful! Cookies saved and validated.\n'));
+              break;
+            } else {
+              console.log(chalk.yellow('   ⚠️  Cookies retrieved but API validation failed.'));
+              console.log(chalk.yellow('   Will continue polling in case login is still in progress...\n'));
+              pollSpinner.start(`[Poll #${poll}] Continuing to poll...`);
+            }
+          } else {
+            console.log(chalk.yellow('   ⚠️  Could not retrieve cookies. Continuing to poll...\n'));
+            pollSpinner.start(`[Poll #${poll}] Continuing to poll...`);
+          }
+        } else {
+          // Page changed but not a full login yet (e.g. scan success, intermediate state)
+          console.log(chalk.gray('   Page changed but login not yet complete. Continuing to poll...\n'));
+          pollSpinner.start(`[Poll #${poll}] Continuing to poll...`);
+        }
+      } else {
+        // No change detected, just update spinner
+        pollSpinner.text = `[Poll #${poll}] No page change detected. Waiting... (${elapsed}s elapsed)`;
+      }
     }
 
-    // Give extra time for all cookies to be set after login completes
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-
-    // Collect all cookies
-    const cookies = await page.cookies();
-
-    if (cookies.length === 0) {
-      throw new Error('No cookies obtained after login');
+    if (!loginDetected) {
+      pollSpinner.fail(chalk.red('Polling timeout: login was not completed within the time limit.'));
+      throw new Error('Login timeout: QR code was not scanned or login was not confirmed within 300 seconds.');
     }
 
-    // Save cookies
-    saveCookies(cookies);
-
-    spinner.start('Verifying login status...');
-    const valid = await isCookieValid(cookies);
-
-    if (valid) {
-      spinner.succeed(chalk.green('Login successful! Cookies saved.'));
-    } else {
-      spinner.warn(chalk.yellow('Cookies saved but validation uncertain. You may need to retry.'));
-    }
-
-    return cookies;
+    pollSpinner.succeed(chalk.green(`Login completed! ${finalCookies.length} cookies saved to ${COOKIE_FILE}`));
+    return finalCookies;
   } catch (err) {
-    spinner.fail(chalk.red(`Login failed: ${err.message}`));
+    if (spinner.isSpinning) {
+      spinner.fail(chalk.red(`Login failed: ${err.message}`));
+    } else {
+      console.error(chalk.red(`\n❌ Login failed: ${err.message}`));
+    }
     throw err;
   } finally {
     if (browser) {

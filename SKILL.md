@@ -8,7 +8,7 @@ description: Tencent Docs Markdown Agent Skill — Create, write, read, update, 
 
 > **Name:** `tencent-docs-markdown`
 > **License:** MIT
-> **Description:** 通过自然语言与腾讯文档 Markdown 进行交互的 Agent 技能，支持新建文档并写入内容、下载、删除、读取、更新、重命名等操作。
+> **Description:** 腾讯文档 Markdown 技能，支持新建文档并写入内容、下载、删除、读取、更新、重命名等操作。
 
 ---
 
