@@ -239,10 +239,13 @@ async function renameDocument(cookies, padId, newTitle) {
 }
 
 /**
- * Parse document URL to extract pad ID
+ * Parse document URL to extract the URL hash identifier
+ *
+ * Note: The URL hash (e.g. "DSFdDdHBqa2ZESUNw") is NOT the real padId.
+ * Use resolveRealPadId() to get the actual padId from the document page.
  *
  * @param {string} url - Tencent Docs Markdown URL (e.g. "https://docs.qq.com/markdown/xxxxx")
- * @returns {string} - Extracted pad ID
+ * @returns {string} - Extracted URL hash identifier
  */
 function parsePadIdFromUrl(url) {
   // Handle URLs like:
@@ -256,6 +259,52 @@ function parsePadIdFromUrl(url) {
   return parts[parts.length - 1] || '';
 }
 
+/**
+ * Resolve the real padId by fetching the document page and parsing basicClientVars.
+ *
+ * The URL hash identifier (from parsePadIdFromUrl) differs from the actual padId
+ * used by the read/write APIs. This function fetches the document HTML page and
+ * extracts the real padId from the embedded basicClientVars JSON.
+ *
+ * @param {Array} cookies - Session cookies
+ * @param {string} docUrl - Full Tencent Docs Markdown URL
+ * @returns {object} - { padId, globalPadId, title }
+ */
+async function resolveRealPadId(cookies, docUrl) {
+  const resp = await axios.get(docUrl, {
+    headers: {
+      ...getHeaders(cookies),
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    },
+    timeout: 30000,
+    maxRedirects: 5,
+  });
+
+  const html = resp.data;
+
+  // Extract base64-encoded basicClientVars from the page
+  const match = html.match(/atob\('([^']+)'\)/);
+  if (!match) {
+    throw new Error('Cannot extract basicClientVars from document page');
+  }
+
+  const decoded = Buffer.from(match[1], 'base64').toString('utf-8');
+  const clientVars = JSON.parse(decoded);
+
+  const padInfo = clientVars?.docInfo?.padInfo;
+  if (!padInfo || !padInfo.padId) {
+    throw new Error('Cannot find padId in basicClientVars');
+  }
+
+  const padId = padInfo.padId;
+  const domainId = padInfo.domainId || DEFAULT_DOMAIN_ID;
+  const separator = '$';
+  const globalPadId = domainId + separator + padId;
+  const title = padInfo.padTitle || '';
+
+  return { padId, globalPadId, title };
+}
+
 module.exports = {
   createDocument,
   deleteDocument,
@@ -264,6 +313,7 @@ module.exports = {
   getDocumentInfo,
   renameDocument,
   parsePadIdFromUrl,
+  resolveRealPadId,
   BASE_URL,
   DEFAULT_DOMAIN_ID,
   DOC_TYPE_MARKDOWN,

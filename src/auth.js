@@ -176,30 +176,117 @@ async function loginWithQRCode() {
     });
 
     // Wait for QR code page to fully load
-    spinner.text = 'Waiting for QR code to appear...';
+    spinner.text = 'Waiting for login page to load...';
     try {
       await page.waitForSelector('iframe[src*="xlogin"], iframe[src*="weixin"]', { timeout: 15000 });
       await new Promise((resolve) => setTimeout(resolve, 3000));
     } catch {
-      // QR code may appear without iframe
+      // Login page may appear without iframe
       await new Promise((resolve) => setTimeout(resolve, 5000));
     }
 
-    spinner.stop();
-    console.log(chalk.yellow('\n📱 Please scan the QR code in the browser window to log in.'));
-    console.log(chalk.gray('   Polling every 10s to detect login status...\n'));
+    // Step 4: Attempt WeChat Quick Login (微信快捷登录)
+    // If the user has previously logged in via WeChat, a "微信快捷登录" button will appear.
+    // Clicking it triggers an automatic login that shows "登录中..." status.
+    spinner.text = 'Checking for WeChat Quick Login button...';
+    let quickLoginClicked = false;
+    try {
+      quickLoginClicked = await page.evaluate(() => {
+        // Strategy 1: Look for the quick login button by text content in main document
+        const allEls = document.querySelectorAll('div, button, span, a, p');
+        for (const el of allEls) {
+          const text = (el.textContent || '').trim();
+          if (text === '微信快捷登录' && el.children.length <= 2) {
+            const rect = el.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0 && rect.width < 400) {
+              el.click();
+              return true;
+            }
+          }
+        }
+        // Strategy 2: Look within same-origin iframes
+        const iframes = document.querySelectorAll('iframe');
+        for (const iframe of iframes) {
+          try {
+            const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+            if (!iframeDoc) continue;
+            const iframeEls = iframeDoc.querySelectorAll('div, button, span, a, p');
+            for (const el of iframeEls) {
+              const text = (el.textContent || '').trim();
+              if (text === '微信快捷登录' && el.children.length <= 2) {
+                const rect = el.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
+                  el.click();
+                  return true;
+                }
+              }
+            }
+          } catch {
+            // Cross-origin iframe — skip
+          }
+        }
+        return false;
+      });
+    } catch {
+      quickLoginClicked = false;
+    }
+
+    // If quick login button not found via page.evaluate, try inside iframe contentFrame
+    if (!quickLoginClicked) {
+      try {
+        const loginFrame = await page.$('iframe[src*="xlogin"]');
+        if (loginFrame) {
+          const frame = await loginFrame.contentFrame();
+          if (frame) {
+            const quickBtn = await frame.evaluate(() => {
+              const els = document.querySelectorAll('div, a, span, button, p, img');
+              for (const el of els) {
+                const text = (el.textContent || el.alt || '').trim();
+                if (text.includes('快捷登录') || text.includes('快速登录') || text.includes('微信快捷')) {
+                  const rect = el.getBoundingClientRect();
+                  if (rect.width > 0 && rect.height > 0) {
+                    el.click();
+                    return true;
+                  }
+                }
+              }
+              return false;
+            });
+            if (quickBtn) quickLoginClicked = true;
+          }
+        }
+      } catch {
+        // iframe access failed — fall back to QR code scan
+      }
+    }
+
+    if (quickLoginClicked) {
+      spinner.stop();
+      console.log(chalk.cyan('\n🚀 WeChat Quick Login button clicked!'));
+      console.log(chalk.gray('   Detected "登录中..." status. Waiting for login to complete...'));
+      console.log(chalk.gray('   Polling every 10s to detect login status...\n'));
+      // Wait for the "登录中..." transition to start
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    } else {
+      spinner.stop();
+      console.log(chalk.yellow('\n📱 Please scan the QR code in the browser window to log in.'));
+      console.log(chalk.gray('   (Or click "微信快捷登录" button in the browser if available)'));
+      console.log(chalk.gray('   Polling every 10s to detect login status...\n'));
+    }
 
     // ──────────────────────────────────────────────────
     //  10-second Polling: detect page change → check login → get cookies
     // ──────────────────────────────────────────────────
 
     /**
-     * Capture a snapshot of the current page state for comparison
+     * Capture a comprehensive snapshot of the current page state.
+     * Includes URL, title, body text fingerprint, DOM structure signals,
+     * cookie presence, and element visibility flags.
      */
     async function capturePageSnapshot() {
       try {
         return await page.evaluate(() => {
-          const bodyText = (document.body.innerText || '').substring(0, 2000);
+          const bodyText = (document.body.innerText || '').substring(0, 3000);
           const iframeCount = document.querySelectorAll('iframe').length;
           const hasQrIframe = !!document.querySelector('iframe[src*="xlogin"], iframe[src*="weixin"]');
           const hasAvatar = !!document.querySelector('[class*="avatar"], [class*="user-info"], [class*="header-user"]');
@@ -207,153 +294,224 @@ async function loginWithQRCode() {
           const modalVisible = !!document.querySelector(
             '[class*="login-modal"], [class*="login-dialog"], [class*="login-panel"], [class*="compliance"]'
           );
+          // Detect "登录中..." status (WeChat Quick Login in progress)
+          const hasLoggingInStatus = bodyText.includes('登录中') || bodyText.includes('Logging in');
+          // Build a content fingerprint: length + first 500 chars of visible text
+          const contentFingerprint = bodyText.length + '|' + bodyText.substring(0, 500);
+          // Count major DOM elements as a structural signal
+          const domElementCount = document.querySelectorAll('div, section, main, article, header, nav').length;
           return {
             url: window.location.href,
             title: document.title,
-            bodyTextHash: bodyText.length + ':' + bodyText.substring(0, 200),
+            contentFingerprint,
+            domElementCount,
             iframeCount,
             hasQrIframe,
             hasAvatar,
             hasTOK,
             modalVisible,
+            hasLoggingInStatus,
           };
         });
       } catch {
-        // Page may be navigating
-        return { url: '', title: '', bodyTextHash: '', iframeCount: 0, hasQrIframe: false, hasAvatar: false, hasTOK: false, modalVisible: false };
+        // Page may be navigating / reloading — return empty snapshot
+        return {
+          url: '', title: '', contentFingerprint: '', domElementCount: 0,
+          iframeCount: 0, hasQrIframe: false, hasAvatar: false, hasTOK: false, modalVisible: false,
+          hasLoggingInStatus: false,
+        };
       }
     }
 
     /**
-     * Determine if the page has significantly changed compared to the baseline
+     * Compute a list of specific change signals between two snapshots.
+     * Returns an array of { signal, description } objects.
+     * An empty array means nothing changed.
      */
-    function hasPageChanged(baseline, current) {
-      // URL changed (e.g., redirected after login)
-      if (baseline.url !== current.url) return true;
-      // Title changed significantly
-      if (baseline.title !== current.title) return true;
-      // QR code iframe disappeared (login completed)
-      if (baseline.hasQrIframe && !current.hasQrIframe) return true;
-      // Avatar appeared (user logged in)
-      if (!baseline.hasAvatar && current.hasAvatar) return true;
-      // TOK cookie appeared
-      if (!baseline.hasTOK && current.hasTOK) return true;
-      // Login modal disappeared
-      if (baseline.modalVisible && !current.modalVisible) return true;
-      // Body text changed significantly (page content fully changed)
-      if (baseline.bodyTextHash !== current.bodyTextHash) return true;
-      return false;
+    function detectChanges(prev, curr) {
+      const changes = [];
+      if (prev.url !== curr.url) {
+        changes.push({ signal: 'url', description: `URL: ${prev.url} → ${curr.url}` });
+      }
+      if (prev.title !== curr.title) {
+        changes.push({ signal: 'title', description: `Title: "${prev.title}" → "${curr.title}"` });
+      }
+      if (prev.hasQrIframe && !curr.hasQrIframe) {
+        changes.push({ signal: 'qr_gone', description: 'QR code iframe disappeared' });
+      }
+      if (!prev.hasAvatar && curr.hasAvatar) {
+        changes.push({ signal: 'avatar', description: 'User avatar appeared' });
+      }
+      if (!prev.hasTOK && curr.hasTOK) {
+        changes.push({ signal: 'tok', description: 'TOK cookie detected in page' });
+      }
+      if (prev.modalVisible && !curr.modalVisible) {
+        changes.push({ signal: 'modal_gone', description: 'Login modal disappeared' });
+      }
+      if (prev.contentFingerprint !== curr.contentFingerprint) {
+        changes.push({ signal: 'content', description: 'Page content changed' });
+      }
+      if (Math.abs(prev.domElementCount - curr.domElementCount) > 10) {
+        changes.push({ signal: 'dom_structure', description: `DOM structure changed (${prev.domElementCount} → ${curr.domElementCount} elements)` });
+      }
+      // Detect WeChat Quick Login: "登录中..." status appeared
+      if (!prev.hasLoggingInStatus && curr.hasLoggingInStatus) {
+        changes.push({ signal: 'logging_in', description: 'WeChat Quick Login in progress (登录中...)' });
+      }
+      // Detect WeChat Quick Login completed: "登录中..." status disappeared
+      if (prev.hasLoggingInStatus && !curr.hasLoggingInStatus) {
+        changes.push({ signal: 'logging_in_done', description: 'WeChat Quick Login "登录中..." status cleared — login likely completed' });
+      }
+      return changes;
     }
 
     /**
-     * Check if the current page state indicates a successful login
+     * Determine if the page has "completely changed" — i.e. a major transition
+     * happened, not just a minor DOM tweak. We require at least 2 signals
+     * or one strong signal (URL / TOK / avatar / qr_gone / logging_in_done)
+     * to consider it a full change.
      */
-    function isLoginDetected(snapshot) {
+    function isFullPageChange(changes) {
+      const strongSignals = ['url', 'tok', 'avatar', 'qr_gone', 'logging_in_done'];
+      const hasStrong = changes.some((c) => strongSignals.includes(c.signal));
+      return hasStrong || changes.length >= 2;
+    }
+
+    /**
+     * Check if the current page state indicates a successful login.
+     * Handles both QR code scan login and WeChat Quick Login (微信快捷登录).
+     *
+     * WeChat Quick Login flow:
+     * 1. User clicks "微信快捷登录" button
+     * 2. Page shows "登录中..." status with a loading indicator
+     * 3. After successful auth, page redirects to /desktop with user session
+     *
+     * We detect login success when:
+     * - TOK cookie is present (strongest signal)
+     * - User avatar is visible and QR iframe is gone
+     * - Page has navigated to /desktop or /home without login elements and "登录中..." is gone
+     * - The "登录中..." status has disappeared (transition from logging-in to logged-in)
+     */
+    function isLoginDetected(snapshot, changes) {
       // TOK cookie is present — strong signal
       if (snapshot.hasTOK) return true;
       // Avatar visible and QR iframe gone — user is logged in
       if (snapshot.hasAvatar && !snapshot.hasQrIframe) return true;
-      // Redirected to desktop without login elements
-      if (snapshot.url.includes('/desktop') && !snapshot.hasQrIframe && !snapshot.modalVisible) return true;
+      // WeChat Quick Login: "登录中..." just disappeared → login completed
+      if (changes && changes.some((c) => c.signal === 'logging_in_done')) {
+        // Extra check: make sure we're not still on a login page
+        if (!snapshot.hasQrIframe && !snapshot.hasLoggingInStatus) return true;
+      }
+      // Redirected to desktop/home without login elements and not in "logging in" state
+      if (
+        (snapshot.url.includes('/desktop') || snapshot.url.includes('/home')) &&
+        !snapshot.hasQrIframe &&
+        !snapshot.modalVisible &&
+        !snapshot.hasLoggingInStatus
+      ) {
+        return true;
+      }
       return false;
     }
 
-    // Capture baseline snapshot (the QR code page before scanning)
-    const baselineSnapshot = await capturePageSnapshot();
-    console.log(chalk.gray(`   [Baseline] URL: ${baselineSnapshot.url}`));
-    console.log(chalk.gray(`   [Baseline] QR iframe: ${baselineSnapshot.hasQrIframe}, Modal: ${baselineSnapshot.modalVisible}\n`));
+    /**
+     * Attempt to retrieve cookies from the browser, with retry.
+     * Returns the cookie array or null if nothing could be obtained.
+     */
+    async function retrieveCookies() {
+      let cookies = await page.cookies();
+      if (cookies.length === 0) {
+        console.log(chalk.yellow('   ⚠️  No cookies yet, waiting 5s and retrying...'));
+        await new Promise((r) => setTimeout(r, 5000));
+        cookies = await page.cookies();
+      }
+      return cookies.length > 0 ? cookies : null;
+    }
+
+    // ── Start polling ────────────────────────────────
+
+    // Capture the initial baseline (QR code page before user scans)
+    let prevSnapshot = await capturePageSnapshot();
+    console.log(chalk.gray(`   [Baseline] URL: ${prevSnapshot.url}`));
+    console.log(chalk.gray(`   [Baseline] QR iframe: ${prevSnapshot.hasQrIframe}, Modal: ${prevSnapshot.modalVisible}\n`));
 
     const pollSpinner = ora('Polling login status every 10 seconds...').start();
     let loginDetected = false;
     let finalCookies = null;
 
     for (let poll = 1; poll <= MAX_POLLS; poll++) {
-      // Wait 10 seconds
+      // Wait 10 seconds before each check
       await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
 
       const elapsed = poll * (POLL_INTERVAL / 1000);
       pollSpinner.text = `[Poll #${poll}] Checking page status... (${elapsed}s elapsed)`;
 
       // Capture current page snapshot
-      const currentSnapshot = await capturePageSnapshot();
+      const currSnapshot = await capturePageSnapshot();
 
-      // Check if page has changed
-      const changed = hasPageChanged(baselineSnapshot, currentSnapshot);
+      // Compute changes since the *previous* snapshot (not always the original baseline)
+      const changes = detectChanges(prevSnapshot, currSnapshot);
 
-      if (changed) {
-        pollSpinner.info(
-          chalk.blue(`[Poll #${poll} - ${elapsed}s] Page change detected!`)
-        );
+      if (changes.length === 0) {
+        // Nothing changed — keep waiting
+        pollSpinner.text = `[Poll #${poll}] No page change. Waiting... (${elapsed}s elapsed)`;
+        continue;
+      }
 
-        // Log what changed
-        if (baselineSnapshot.url !== currentSnapshot.url) {
-          console.log(chalk.gray(`   URL: ${baselineSnapshot.url} → ${currentSnapshot.url}`));
-        }
-        if (baselineSnapshot.hasQrIframe && !currentSnapshot.hasQrIframe) {
-          console.log(chalk.gray('   QR code iframe disappeared'));
-        }
-        if (!baselineSnapshot.hasAvatar && currentSnapshot.hasAvatar) {
-          console.log(chalk.gray('   User avatar appeared'));
-        }
-        if (!baselineSnapshot.hasTOK && currentSnapshot.hasTOK) {
-          console.log(chalk.gray('   TOK cookie detected'));
-        }
-        if (baselineSnapshot.bodyTextHash !== currentSnapshot.bodyTextHash) {
-          console.log(chalk.gray('   Page content changed'));
-        }
+      // Something changed — log it
+      pollSpinner.info(chalk.blue(`[Poll #${poll} - ${elapsed}s] ${changes.length} change(s) detected:`));
+      for (const c of changes) {
+        console.log(chalk.gray(`   • ${c.description}`));
+      }
 
-        // Check if the change indicates login success
-        if (isLoginDetected(currentSnapshot)) {
-          console.log(chalk.green('\n   ✅ Login detected! Attempting to retrieve cookies...\n'));
+      // Check whether this is a "full page change" (not just a minor DOM tweak)
+      if (!isFullPageChange(changes)) {
+        console.log(chalk.gray('   Minor change only. Updating baseline and continuing to poll...\n'));
+        prevSnapshot = currSnapshot; // Update baseline to avoid re-detecting this change
+        pollSpinner.start(`[Poll #${poll}] Continuing to poll...`);
+        continue;
+      }
 
-          // Give a little extra time for all cookies to settle
-          await new Promise((resolve) => setTimeout(resolve, 3000));
+      console.log(chalk.cyan('   ↳ Full page change detected! Checking if login is complete...'));
 
-          // Retrieve cookies from the browser page
-          const cookies = await page.cookies();
+      // Full page change detected — check if it means login succeeded
+      if (isLoginDetected(currSnapshot, changes)) {
+        console.log(chalk.green('\n   ✅ Login detected! Attempting to retrieve cookies...\n'));
 
-          if (cookies.length === 0) {
-            console.log(chalk.yellow('   ⚠️  No cookies retrieved yet, waiting a bit longer...'));
-            await new Promise((resolve) => setTimeout(resolve, 5000));
-            const retryCookies = await page.cookies();
-            if (retryCookies.length > 0) {
-              finalCookies = retryCookies;
-            }
+        // Wait a moment for all cookies to settle
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+
+        // Retrieve cookies from the browser
+        finalCookies = await retrieveCookies();
+
+        if (finalCookies) {
+          console.log(chalk.gray(`   Retrieved ${finalCookies.length} cookies from browser`));
+          console.log(chalk.gray('   Validating cookies against Tencent Docs API...'));
+
+          const valid = await isCookieValid(finalCookies);
+
+          if (valid) {
+            // Cookies are valid — save and complete login
+            saveCookies(finalCookies);
+            loginDetected = true;
+            console.log(chalk.green.bold('\n🎉 Login successful! Cookies saved and validated.\n'));
+            break;
           } else {
-            finalCookies = cookies;
-          }
-
-          if (finalCookies && finalCookies.length > 0) {
-            console.log(chalk.gray(`   Retrieved ${finalCookies.length} cookies from browser`));
-
-            // Validate cookies by calling the API
-            console.log(chalk.gray('   Validating cookies against Tencent Docs API...'));
-            const valid = await isCookieValid(finalCookies);
-
-            if (valid) {
-              // Cookies are valid — save and complete login
-              saveCookies(finalCookies);
-              loginDetected = true;
-              console.log(chalk.green.bold('\n🎉 Login successful! Cookies saved and validated.\n'));
-              break;
-            } else {
-              console.log(chalk.yellow('   ⚠️  Cookies retrieved but API validation failed.'));
-              console.log(chalk.yellow('   Will continue polling in case login is still in progress...\n'));
-              pollSpinner.start(`[Poll #${poll}] Continuing to poll...`);
-            }
-          } else {
-            console.log(chalk.yellow('   ⚠️  Could not retrieve cookies. Continuing to poll...\n'));
-            pollSpinner.start(`[Poll #${poll}] Continuing to poll...`);
+            console.log(chalk.yellow('   ⚠️  Cookies retrieved but API validation failed.'));
+            console.log(chalk.yellow('   Will continue polling in case login is still in progress...\n'));
           }
         } else {
-          // Page changed but not a full login yet (e.g. scan success, intermediate state)
-          console.log(chalk.gray('   Page changed but login not yet complete. Continuing to poll...\n'));
-          pollSpinner.start(`[Poll #${poll}] Continuing to poll...`);
+          console.log(chalk.yellow('   ⚠️  Could not retrieve cookies. Continuing to poll...\n'));
         }
       } else {
-        // No change detected, just update spinner
-        pollSpinner.text = `[Poll #${poll}] No page change detected. Waiting... (${elapsed}s elapsed)`;
+        // Page fully changed but login not confirmed yet
+        // (e.g. scan success intermediate page, WeChat "登录中..." state, or redirect to another step)
+        console.log(chalk.gray('   Page fully changed but login not yet confirmed. Continuing to poll...\n'));
       }
+
+      // Update baseline to current state so next poll detects further changes
+      prevSnapshot = currSnapshot;
+      pollSpinner.start(`[Poll #${poll}] Continuing to poll...`);
     }
 
     if (!loginDetected) {

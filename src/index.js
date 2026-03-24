@@ -18,6 +18,7 @@ const {
   getDocumentInfo,
   renameDocument,
   parsePadIdFromUrl,
+  resolveRealPadId,
   DEFAULT_DOMAIN_ID,
 } = require('./api');
 
@@ -98,13 +99,12 @@ async function handleDownload(docUrl, outputPath) {
   const spinner = ora('Downloading Markdown document...').start();
   try {
     const cookies = await ensureLogin();
-    const padId = parsePadIdFromUrl(docUrl);
 
-    if (!padId) {
-      throw new Error(`Cannot parse document ID from URL: ${docUrl}`);
-    }
-
-    const globalPadId = `${DEFAULT_DOMAIN_ID}$${padId}`;
+    // Resolve the real padId from the document page
+    // (URL hash identifier differs from the actual padId used by APIs)
+    spinner.text = 'Resolving document ID...';
+    const docMeta = await resolveRealPadId(cookies, docUrl);
+    const { globalPadId, title: docTitle, padId } = docMeta;
 
     // Read content
     spinner.text = 'Reading document content...';
@@ -113,14 +113,8 @@ async function handleDownload(docUrl, outputPath) {
     // Determine output path
     let savePath = outputPath;
     if (!savePath) {
-      // Try to get doc info for the title
-      try {
-        const info = await getDocumentInfo(cookies, padId);
-        const title = info?.result?.title || info?.title || padId;
-        savePath = `${title.replace(/[/\\?%*:|"<>]/g, '_')}.md`;
-      } catch {
-        savePath = `${padId}.md`;
-      }
+      const title = docTitle || padId;
+      savePath = `${title.replace(/[/\\?%*:|"<>]/g, '_')}.md`;
     }
 
     // Ensure .md extension
@@ -175,13 +169,12 @@ async function handleRead(docUrl) {
   const spinner = ora('Reading Markdown document...').start();
   try {
     const cookies = await ensureLogin();
-    const padId = parsePadIdFromUrl(docUrl);
 
-    if (!padId) {
-      throw new Error(`Cannot parse document ID from URL: ${docUrl}`);
-    }
+    // Resolve the real padId from the document page
+    spinner.text = 'Resolving document ID...';
+    const docMeta = await resolveRealPadId(cookies, docUrl);
+    const { globalPadId } = docMeta;
 
-    const globalPadId = `${DEFAULT_DOMAIN_ID}$${padId}`;
     const content = await readDocument(cookies, globalPadId);
 
     spinner.succeed(chalk.green('Document content retrieved.'));
@@ -206,13 +199,11 @@ async function handleUpdate(docUrl, contentOrPath) {
   const spinner = ora('Updating Markdown document...').start();
   try {
     const cookies = await ensureLogin();
-    const padId = parsePadIdFromUrl(docUrl);
 
-    if (!padId) {
-      throw new Error(`Cannot parse document ID from URL: ${docUrl}`);
-    }
-
-    const globalPadId = `${DEFAULT_DOMAIN_ID}$${padId}`;
+    // Resolve the real padId from the document page
+    spinner.text = 'Resolving document ID...';
+    const docMeta = await resolveRealPadId(cookies, docUrl);
+    const { globalPadId, padId } = docMeta;
 
     // Determine if contentOrPath is a file path or direct content
     let content = contentOrPath;
