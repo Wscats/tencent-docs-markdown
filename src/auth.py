@@ -221,8 +221,8 @@ def login_with_qr_code() -> list:
         page = context.new_page()
 
         print('   Navigating to Tencent Docs login page...')
-        page.goto(DOCS_URL, wait_until='networkidle', timeout=60000)
-        time.sleep(3)
+        page.goto(DOCS_URL, wait_until='domcontentloaded', timeout=120000)
+        time.sleep(5)
 
         # Step 1: Click "立即登录" on the homepage
         print('   Clicking login button...')
