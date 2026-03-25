@@ -9,6 +9,11 @@ import json
 import os
 import time
 import re
+import io
+import subprocess
+import sys
+import tempfile
+import platform
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -193,6 +198,193 @@ def is_cookie_valid(cookies: list) -> bool:
         return False
 
 
+def _extract_qr_url_from_page(page) -> str | None:
+    """
+    Extract the QR code image URL from the login page.
+
+    Looks for the QR code element matching:
+      <div class="wrp_code">
+        <img class="qrcode lightBorder js_qrcode_img" src="/connect/qrcode/...">
+      </div>
+
+    Searches both the main page and any login iframes (e.g. xlogin).
+    Uses Playwright's content_frame() API for cross-origin iframe access.
+    Returns the full URL or None if not found.
+    """
+    QR_SELECTORS = [
+        '.wrp_code .qrcode',
+        '.wrp_code .js_qrcode_img',
+        'img.js_qrcode_img',
+        'img.qrcode',
+        'img[src*="/connect/qrcode/"]',
+    ]
+    IFRAME_SELECTORS = [
+        'iframe[src*="xlogin"]',
+        'iframe[src*="ssl.ptlogin2"]',
+        'iframe[src*="graph.qq.com"]',
+        'iframe[src*="open.weixin"]',
+    ]
+
+    def _resolve_full_url(src: str, frame_url: str = '') -> str:
+        """Resolve a potentially relative QR code src to a full URL."""
+        if not src:
+            return ''
+        if src.startswith('http://') or src.startswith('https://'):
+            return src
+        if src.startswith('//'):
+            return 'https:' + src
+        # Relative path — resolve against the frame's origin
+        if frame_url:
+            parsed = urlparse(frame_url)
+            return f'{parsed.scheme}://{parsed.netloc}{src}'
+        # Fallback: assume QQ's xlogin origin
+        return f'https://xui.ptlogin2.qq.com{src}'
+
+    def _try_extract_from_frame(frame) -> str | None:
+        """Try to extract QR code URL from a Playwright frame."""
+        try:
+            # Wait briefly for QR code image to appear
+            for selector in QR_SELECTORS:
+                try:
+                    frame.wait_for_selector(selector, timeout=3000)
+                    break
+                except Exception:
+                    continue
+
+            src = frame.evaluate("""(selectors) => {
+                for (const sel of selectors) {
+                    const img = document.querySelector(sel);
+                    if (img && img.src) return img.src;
+                    if (img && img.getAttribute('src')) return img.getAttribute('src');
+                }
+                // Fallback: find any img with qrcode-related src
+                const allImgs = document.querySelectorAll('img');
+                for (const img of allImgs) {
+                    const s = img.getAttribute('src') || '';
+                    if (s.includes('/connect/qrcode/') || s.includes('qrcode')) return img.src || s;
+                }
+                return null;
+            }""", QR_SELECTORS)
+
+            if src:
+                return _resolve_full_url(src, frame.url)
+        except Exception:
+            pass
+        return None
+
+    # Strategy 1: Try main page directly
+    result = _try_extract_from_frame(page)
+    if result:
+        return result
+
+    # Strategy 2: Try all matching iframes via Playwright's content_frame() API
+    # (This works for cross-origin iframes where evaluate() cannot reach)
+    for iframe_sel in IFRAME_SELECTORS:
+        try:
+            iframe_el = page.query_selector(iframe_sel)
+            if iframe_el:
+                frame = iframe_el.content_frame()
+                if frame:
+                    result = _try_extract_from_frame(frame)
+                    if result:
+                        return result
+        except Exception:
+            continue
+
+    # Strategy 3: Try ALL iframes on the page
+    try:
+        all_frames = page.frames
+        for frame in all_frames:
+            if frame == page.main_frame:
+                continue
+            result = _try_extract_from_frame(frame)
+            if result:
+                return result
+    except Exception:
+        pass
+
+    return None
+
+
+def _display_qr_in_terminal(qr_url: str) -> None:
+    """
+    Display the QR code in the terminal and open it as an image.
+
+    The qr_url is the **image URL** of the QR code (e.g.
+    https://open.weixin.qq.com/connect/qrcode/xxxx), NOT the data
+    encoded inside the QR code.  Therefore we must:
+
+    1. Download the original QR code image from the URL.
+    2. Render it as ASCII art in the terminal so the user can scan it directly.
+    3. Open the downloaded image with the system viewer for easier scanning.
+
+    We do NOT re-generate a new QR code from the URL string, because that
+    would encode the wrong data and produce an unscannable code.
+    """
+    try:
+        from PIL import Image as PILImage
+    except ImportError:
+        print('   \u26a0\ufe0f  Pillow not installed. Run: pip install Pillow')
+        print(f'   \U0001f517 QR Image URL (open in browser): {qr_url}')
+        return
+
+    # --- Step 1: Download the original QR code image ---
+    tmp_file = os.path.join(tempfile.gettempdir(), 'tencent_docs_qr_login.png')
+    try:
+        resp = requests.get(qr_url, timeout=15)
+        resp.raise_for_status()
+        with open(tmp_file, 'wb') as f:
+            f.write(resp.content)
+        img = PILImage.open(tmp_file)
+    except Exception as e:
+        print(f'   \u26a0\ufe0f  Failed to download QR code image: {e}')
+        print(f'   \U0001f517 QR Image URL (open in browser): {qr_url}')
+        return
+
+    # --- Step 2: Render the image as ASCII art in the terminal ---
+    print('\n' + '=' * 60)
+    print('  \U0001f4f1 Scan the QR code below to log in')
+    print('=' * 60)
+
+    try:
+        # Convert to grayscale and resize for terminal display
+        gray = img.convert('L')
+        term_width = 60
+        aspect_ratio = gray.height / gray.width
+        new_width = term_width
+        new_height = int(term_width * aspect_ratio * 0.5)
+        resized = gray.resize((new_width, new_height))
+
+        pixels = resized.load()
+        ascii_lines = []
+        for y in range(new_height):
+            line = ''
+            for x in range(new_width):
+                line += '\u2588\u2588' if pixels[x, y] < 128 else '  '
+            ascii_lines.append(line)
+        print('\n'.join(ascii_lines))
+    except Exception as e:
+        print(f'   \u26a0\ufe0f  Could not render ASCII QR: {e}')
+        print('   (Please scan the QR code in the browser window or the opened image)')
+
+    print('=' * 60)
+    print(f'  \U0001f517 QR Image URL: {qr_url}')
+    print('=' * 60 + '\n')
+
+    # --- Step 3: Open the image with system viewer ---
+    try:
+        system_name = platform.system()
+        if system_name == 'Darwin':
+            subprocess.Popen(['open', tmp_file], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif system_name == 'Linux':
+            subprocess.Popen(['xdg-open', tmp_file], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif system_name == 'Windows':
+            os.startfile(tmp_file)
+
+        print(f'   \U0001f5bc\ufe0f  QR code image opened: {tmp_file}')
+    except Exception as e:
+        print(f'   \u26a0\ufe0f  Could not open QR image: {e}')
+
 def login_with_qr_code() -> list:
     """
     Login via QR code scanning using Playwright.
@@ -357,7 +549,16 @@ def login_with_qr_code() -> list:
             print('   Polling every 10s to detect login status...\n')
             time.sleep(3)
         else:
-            print('\n📱 Please scan the QR code in the browser window to log in.')
+            # --- Extract and display QR code in terminal + image ---
+            print('\n📱 Extracting QR code from login page...')
+            qr_url = _extract_qr_url_from_page(page)
+            if qr_url:
+                _display_qr_in_terminal(qr_url)
+            else:
+                print('   ⚠️  Could not extract QR code URL from page.')
+                print('   Please scan the QR code directly in the browser window.\n')
+
+            print('📱 Please scan the QR code above (or in the browser window) to log in.')
             print('   (Or click "微信快捷登录" button in the browser if available)')
             print('   Polling every 10s to detect login status...\n')
 
