@@ -220,22 +220,38 @@ async function getDocumentInfo(cookies, docId) {
  */
 async function renameDocument(cookies, padId, newTitle) {
   const xsrf = getXsrfToken(cookies);
-  const data = qs.stringify({
-    domain_id: DEFAULT_DOMAIN_ID,
+
+  // The real API passes all parameters via URL query string
+  const params = qs.stringify({
     pad_id: padId,
-    title: newTitle,
+    domain_id: DEFAULT_DOMAIN_ID,
     xsrf,
+    version: 2,
+    auto_change: 0,
+    title: newTitle,
   });
 
-  const resp = await axios.post(`${BASE_URL}/cgi-bin/online_docs/doc_changetitle`, data, {
+  const url = `${BASE_URL}/cgi-bin/online_docs/doc_changetitle?${params}`;
+
+  // Body is an empty multipart/form-data (matching the real browser request)
+  const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
+  const body = `--${boundary}--\r\n`;
+
+  const resp = await axios.post(url, body, {
     headers: {
       ...getHeaders(cookies),
-      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json, text/plain, */*',
+      'Content-Type': `multipart/form-data; boundary=${boundary}`,
     },
     timeout: 30000,
   });
 
-  return resp.data;
+  const result = resp.data;
+  if (result.retcode !== 0 && result.ret !== 0) {
+    throw new Error(`Failed to rename document: ${result.msg || `retcode=${result.retcode}`}`);
+  }
+
+  return result;
 }
 
 /**

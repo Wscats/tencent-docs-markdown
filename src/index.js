@@ -144,10 +144,15 @@ async function handleDelete(docUrl) {
   const spinner = ora('Deleting Markdown document...').start();
   try {
     const cookies = await ensureLogin();
-    const padId = parsePadIdFromUrl(docUrl);
+
+    // Resolve the real padId from the document page
+    // (URL hash like "DSFdDdHBqa2ZESUNw" differs from the actual padId)
+    spinner.text = 'Resolving document ID...';
+    const docMeta = await resolveRealPadId(cookies, docUrl);
+    const { padId } = docMeta;
 
     if (!padId) {
-      throw new Error(`Cannot parse document ID from URL: ${docUrl}`);
+      throw new Error(`Cannot resolve real pad ID from URL: ${docUrl}`);
     }
 
     await deleteDocument(cookies, padId);
@@ -233,16 +238,21 @@ async function handleRename(docUrl, newTitle) {
   const spinner = ora('Renaming document...').start();
   try {
     const cookies = await ensureLogin();
-    const padId = parsePadIdFromUrl(docUrl);
+
+    // Resolve the real padId from the document page
+    // (URL hash like "DSFdDdHBqa2ZESUNw" differs from the actual padId)
+    spinner.text = 'Resolving document ID...';
+    const docMeta = await resolveRealPadId(cookies, docUrl);
+    const { padId } = docMeta;
 
     if (!padId) {
-      throw new Error(`Cannot parse document ID from URL: ${docUrl}`);
+      throw new Error(`Cannot resolve real pad ID from URL: ${docUrl}`);
     }
 
-    await renameDocument(cookies, padId, newTitle);
+    const result = await renameDocument(cookies, padId, newTitle);
 
     spinner.succeed(chalk.green(`Document renamed to: ${newTitle}`));
-    return { padId, newTitle };
+    return { padId, newTitle, raw: result };
   } catch (err) {
     spinner.fail(chalk.red(`Rename failed: ${err.message}`));
     throw err;
