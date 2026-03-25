@@ -48,13 +48,14 @@ flowchart TD
 
 ```bash
 # 1. 安装依赖
-npm install
+pip install -r requirements.txt
+playwright install chromium
 
 # 2. 登录（使用微信/QQ 扫描二维码）
-node src/index.js login
+python -m src.main login
 
 # 3. 新建文档并写入内容
-node src/index.js write "我的文档" "# Hello World"
+python -m src.main write "我的文档" "# Hello World"
 ```
 
 ---
@@ -67,15 +68,15 @@ node src/index.js write "我的文档" "# Hello World"
 
 **命令行：**
 ```bash
-node src/index.js write "我的文档" "# Hello World\n这是我的文档内容。"
+python -m src.main write "我的文档" "# Hello World\n这是我的文档内容。"
 ```
 
 **编程接口：**
-```javascript
-const { handleCreateAndWrite } = require('./src/index');
-const result = await handleCreateAndWrite('我的文档', '# Hello World\n这是内容。');
-// result: { docUrl, padId, globalPadId, title }
-// → 将 result.docUrl 分享给用户
+```python
+from src.main import handle_create_and_write
+result = handle_create_and_write('我的文档', '# Hello World\n这是内容。')
+# result: {'docUrl': ..., 'padId': ..., 'globalPadId': ..., 'title': ...}
+# → 将 result['docUrl'] 分享给用户
 ```
 
 ### 2. 新建空文档
@@ -84,14 +85,14 @@ const result = await handleCreateAndWrite('我的文档', '# Hello World\n这是
 
 **命令行：**
 ```bash
-node src/index.js create "我的新文档"
+python -m src.main create "我的新文档"
 ```
 
 **编程接口：**
-```javascript
-const { handleCreate } = require('./src/index');
-const result = await handleCreate('我的文档');
-// result: { docUrl, padId, globalPadId, title }
+```python
+from src.main import handle_create
+result = handle_create('我的文档')
+# result: {'docUrl': ..., 'padId': ..., 'globalPadId': ..., 'title': ...}
 ```
 
 ### 3. 下载文档
@@ -102,15 +103,15 @@ const result = await handleCreate('我的文档');
 
 **命令行：**
 ```bash
-node src/index.js download https://docs.qq.com/markdown/DQxxxxxxxx
-node src/index.js download https://docs.qq.com/markdown/DQxxxxxxxx -o ./output.md
+python -m src.main download https://docs.qq.com/markdown/DQxxxxxxxx
+python -m src.main download https://docs.qq.com/markdown/DQxxxxxxxx -o ./output.md
 ```
 
 **编程接口：**
-```javascript
-const { handleDownload } = require('./src/index');
-const result = await handleDownload('https://docs.qq.com/markdown/DQxxxxxxxx', './output.md');
-// result: { path, content }
+```python
+from src.main import handle_download
+result = handle_download('https://docs.qq.com/markdown/DQxxxxxxxx', './output.md')
+# result: {'path': ..., 'content': ...}
 ```
 
 ### 4. 读取文档
@@ -119,13 +120,13 @@ const result = await handleDownload('https://docs.qq.com/markdown/DQxxxxxxxx', '
 
 **命令行：**
 ```bash
-node src/index.js read https://docs.qq.com/markdown/DQxxxxxxxx
+python -m src.main read https://docs.qq.com/markdown/DQxxxxxxxx
 ```
 
 **编程接口：**
-```javascript
-const { handleRead } = require('./src/index');
-const content = await handleRead('https://docs.qq.com/markdown/DQxxxxxxxx');
+```python
+from src.main import handle_read
+content = handle_read('https://docs.qq.com/markdown/DQxxxxxxxx')
 ```
 
 ### 5. 更新文档
@@ -134,14 +135,14 @@ const content = await handleRead('https://docs.qq.com/markdown/DQxxxxxxxx');
 
 **命令行：**
 ```bash
-node src/index.js update https://docs.qq.com/markdown/DQxxxxxxxx "# 新内容"
-node src/index.js update https://docs.qq.com/markdown/DQxxxxxxxx ./updated.md
+python -m src.main update https://docs.qq.com/markdown/DQxxxxxxxx "# 新内容"
+python -m src.main update https://docs.qq.com/markdown/DQxxxxxxxx ./updated.md
 ```
 
 **编程接口：**
-```javascript
-const { handleUpdate } = require('./src/index');
-await handleUpdate('https://docs.qq.com/markdown/DQxxxxxxxx', '# 更新后的内容');
+```python
+from src.main import handle_update
+handle_update('https://docs.qq.com/markdown/DQxxxxxxxx', '# 更新后的内容')
 ```
 
 ### 6. 删除文档
@@ -150,48 +151,48 @@ await handleUpdate('https://docs.qq.com/markdown/DQxxxxxxxx', '# 更新后的内
 
 **命令行：**
 ```bash
-node src/index.js delete https://docs.qq.com/markdown/DQxxxxxxxx
+python -m src.main delete https://docs.qq.com/markdown/DQxxxxxxxx
 ```
 
 **编程接口：**
-```javascript
-const { handleDelete } = require('./src/index');
-const result = await handleDelete('https://docs.qq.com/markdown/DQxxxxxxxx');
-// result: { padId, deleted: true }
+```python
+from src.main import handle_delete
+result = handle_delete('https://docs.qq.com/markdown/DQxxxxxxxx')
+# result: {'padId': ..., 'deleted': True}
 ```
 
 ### 7. 重命名文档
 
 **命令行：**
 ```bash
-node src/index.js rename https://docs.qq.com/markdown/DQxxxxxxxx "新标题"
+python -m src.main rename https://docs.qq.com/markdown/DQxxxxxxxx "新标题"
 ```
 
 **编程接口：**
-```javascript
-const { handleRename } = require('./src/index');
-await handleRename('https://docs.qq.com/markdown/DQxxxxxxxx', '新标题');
+```python
+from src.main import handle_rename
+handle_rename('https://docs.qq.com/markdown/DQxxxxxxxx', '新标题')
 ```
 
 ### 8. 获取文档信息
 
 **命令行：**
 ```bash
-node src/index.js info https://docs.qq.com/markdown/DQxxxxxxxx
+python -m src.main info https://docs.qq.com/markdown/DQxxxxxxxx
 ```
 
 **编程接口：**
-```javascript
-const { handleInfo } = require('./src/index');
-const info = await handleInfo('https://docs.qq.com/markdown/DQxxxxxxxx');
+```python
+from src.main import handle_info
+info = handle_info('https://docs.qq.com/markdown/DQxxxxxxxx')
 ```
 
 ### 9. 登录
 
 **命令行：**
 ```bash
-node src/index.js login          # 使用缓存的 Cookies（如有效）
-node src/index.js login --force  # 强制重新登录
+python -m src.main login          # 使用缓存的 Cookies（如有效）
+python -m src.main login --force  # 强制重新登录
 ```
 
 ---
@@ -244,14 +245,16 @@ flowchart TD
 
 ```
 tencent-docs-markdown/
-├── package.json          # 依赖与脚本
+├── requirements.txt      # Python 依赖
 ├── SKILL.md              # 技能定义文件（本文件）
-├── README.md             # 用户指南
+├── publish.sh            # 版本发布脚本
 ├── .cookies.json         # 保存的登录 Cookies（自动生成，已加入 .gitignore）
 └── src/
-    ├── index.js          # 主入口 & CLI 命令
-    ├── auth.js           # 扫码登录 & Cookie 管理
-    └── api.js            # 腾讯文档 Markdown API 客户端
+    ├── __init__.py       # Python 包初始化
+    ├── main.py           # 主入口 & CLI 命令
+    ├── auth.py           # 扫码登录 & Cookie 管理
+    ├── api.py            # 腾讯文档 Markdown API 客户端
+    └── login_with_polling.py  # 轮询登录脚本
 ```
 
 ---
@@ -262,7 +265,7 @@ tencent-docs-markdown/
 
 腾讯文档 Markdown 的 URL 格式为 `https://docs.qq.com/markdown/DSxxxxxxxx`，其中 `DSxxxxxxxx` 是 **URL 标识符**，并非 API 所需的真实 `padId`。
 
-系统通过 `resolveRealPadId()` 函数访问文档页面，从嵌入的 `basicClientVars` JSON 中提取真实的 `padId`，然后拼接为 `globalPadId`（格式：`{domainId}${padId}`）用于 API 调用。
+系统通过 `resolve_real_pad_id()` 函数访问文档页面，从嵌入的 `basicClientVars` JSON 中提取真实的 `padId`，然后拼接为 `globalPadId`（格式：`{domainId}${padId}`）用于 API 调用。
 
 此机制对 **下载（download）**、**读取（read）**、**更新（update）** 操作自动生效，用户无需关注。
 
@@ -288,7 +291,8 @@ tencent-docs-markdown/
 - **安全提示：** `.cookies.json` 包含敏感的会话 Cookie，请勿提交到版本控制或分享给他人，建议限制其文件权限（如 `chmod 600 .cookies.json`）
 - 删除操作会将文档移至回收站（可恢复）
 - 下载/读取/更新操作会自动解析 URL 中的标识符为真实 padId
-- 建议在受控或受信环境中运行此工具，因为 Puppeteer 会下载 Chromium 并使用浏览器自动化权限
+- 建议在受控或受信环境中运行此工具，因为 Playwright 会下载 Chromium 并使用浏览器自动化权限
+- **Python 版本要求：** Python >= 3.10
 
 ---
 
