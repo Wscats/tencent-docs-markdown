@@ -287,6 +287,20 @@ function parsePadIdFromUrl(url) {
  * @returns {object} - { padId, globalPadId, title }
  */
 async function resolveRealPadId(cookies, docUrl) {
+  // Security: Validate that docUrl targets an allowed hostname before attaching cookies
+  const ALLOWED_DOC_HOSTNAMES = ['docs.qq.com'];
+  try {
+    const parsedDocUrl = new URL(docUrl);
+    if (!ALLOWED_DOC_HOSTNAMES.includes(parsedDocUrl.hostname)) {
+      throw new Error(
+        `Security: Blocked cookie transmission to unauthorized hostname: ${parsedDocUrl.hostname}. Only docs.qq.com is allowed.`
+      );
+    }
+  } catch (err) {
+    if (err.message.startsWith('Security:')) throw err;
+    throw new Error(`Invalid docUrl: ${docUrl}`);
+  }
+
   const resp = await axios.get(docUrl, {
     headers: {
       ...getHeaders(cookies),

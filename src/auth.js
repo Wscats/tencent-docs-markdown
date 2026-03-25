@@ -52,13 +52,13 @@ function sanitizeCookies(data) {
     if (typeof cookie.name !== 'string' || typeof cookie.value !== 'string') return null;
     if (cookie.name.length === 0) return null;
 
-    // If a domain field exists, it must match the allowed whitelist
-    if (cookie.domain && typeof cookie.domain === 'string') {
-      const domainOk = ALLOWED_COOKIE_DOMAINS.some(
-        (d) => cookie.domain === d || cookie.domain.endsWith(d)
-      );
-      if (!domainOk) return null;
-    }
+    // domain field is required and must match the allowed whitelist.
+    // Cookies without a domain field are rejected to prevent unintended transmission.
+    if (!cookie.domain || typeof cookie.domain !== 'string') return null;
+    const domainOk = ALLOWED_COOKIE_DOMAINS.some(
+      (d) => cookie.domain === d || cookie.domain.endsWith(d)
+    );
+    if (!domainOk) return null;
 
     // Build a clean copy containing only known safe properties
     // to prevent prototype-pollution or unexpected fields
