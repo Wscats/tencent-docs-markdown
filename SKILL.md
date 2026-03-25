@@ -1,5 +1,5 @@
 ---
-name: tencent-docs-markdown
+name: 腾讯文档Markdown
 license: MIT
 description: 腾讯文档 Markdown 技能，支持新建 Markdown 并写入内容、下载、删除、读取、更新、重命名等操作。
 ---

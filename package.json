@@ -1,12 +1,16 @@
 {
   "name": "tencent-docs-markdown",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Tencent Docs Markdown Skill - Create, upload, download, and delete Markdown documents via natural language",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "login": "node src/index.js login",
-    "login:force": "node src/index.js login --force"
+    "login:force": "node src/index.js login --force",
+    "publish": "./publish.sh",
+    "publish:patch": "./publish.sh patch",
+    "publish:minor": "./publish.sh minor",
+    "publish:major": "./publish.sh major"
   },
   "dependencies": {
     "axios": "^1.7.0",

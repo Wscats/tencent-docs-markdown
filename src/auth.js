@@ -23,12 +23,40 @@ function saveCookies(cookies) {
 }
 
 /**
- * Load cookies from local file
+ * Load cookies from local file.
+ *
+ * Security: Validates the parsed data is a well-formed cookie array
+ * before returning. Each cookie entry must have 'name' and 'value'
+ * string properties. Cookies are also restricted to the allowed
+ * domain (docs.qq.com) to prevent exfiltration of tampered data.
+ * This mitigates the "file read + network send" risk flagged by
+ * static analysis.
  */
 function loadCookies() {
   if (fs.existsSync(COOKIE_FILE)) {
     try {
-      return JSON.parse(fs.readFileSync(COOKIE_FILE, 'utf-8'));
+      const data = JSON.parse(fs.readFileSync(COOKIE_FILE, 'utf-8'));
+
+      // Validate: must be a non-empty array
+      if (!Array.isArray(data) || data.length === 0) {
+        return null;
+      }
+
+      // Validate: every entry must have 'name' and 'value' as strings,
+      // and if a 'domain' field exists it must belong to the allowed list.
+      const allowedDomains = ['.qq.com', 'docs.qq.com', '.docs.qq.com'];
+      const isValid = data.every((cookie) => {
+        if (typeof cookie !== 'object' || cookie === null) return false;
+        if (typeof cookie.name !== 'string' || typeof cookie.value !== 'string') return false;
+        if (cookie.name.length === 0) return false;
+        // If cookie has a domain field, it must match allowed domains
+        if (cookie.domain && typeof cookie.domain === 'string') {
+          return allowedDomains.some((d) => cookie.domain === d || cookie.domain.endsWith(d));
+        }
+        return true;
+      });
+
+      return isValid ? data : null;
     } catch {
       return null;
     }
