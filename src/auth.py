@@ -347,22 +347,52 @@ def _display_qr_in_terminal(qr_url: str) -> None:
     print('=' * 60)
 
     try:
-        # Convert to grayscale and resize for terminal display
-        gray = img.convert('L')
-        term_width = 60
-        aspect_ratio = gray.height / gray.width
-        new_width = term_width
-        new_height = int(term_width * aspect_ratio * 0.5)
-        resized = gray.resize((new_width, new_height))
+        # Convert to 1-bit black/white for a clean QR code
+        bw = img.convert('1')
+
+        # Crop to the bounding box of the dark pixels to remove
+        # any surrounding whitespace from the original image
+        bw_inv = bw.point(lambda p: 0 if p else 255)  # invert: dark=255
+        bbox = bw_inv.getbbox()
+        if bbox:
+            bw = bw.crop(bbox)
+
+        # Resize to a fixed square size using nearest-neighbor to keep
+        # sharp QR module edges. Cap at 53 modules for terminal width.
+        qr_size = bw.width
+        target_modules = min(qr_size, 53)
+        resized = bw.resize((target_modules, target_modules), PILImage.NEAREST)
 
         pixels = resized.load()
-        ascii_lines = []
-        for y in range(new_height):
-            line = ''
-            for x in range(new_width):
-                line += '\u2588\u2588' if pixels[x, y] < 128 else '  '
-            ascii_lines.append(line)
-        print('\n'.join(ascii_lines))
+        w = target_modules
+        h = target_modules
+
+        def _is_black(x, y):
+            """Check if pixel at (x,y) is black. Out-of-bounds = white."""
+            if x < 0 or x >= w or y < 0 or y >= h:
+                return False
+            return pixels[x, y] == 0  # 0 = black in mode '1'
+
+        # Use Unicode half-block characters to pack 2 pixel rows into
+        # 1 terminal row, doubling the effective vertical resolution.
+        lines = []
+        # Add a 1-module quiet zone around the QR code
+        for row in range(-1, h + 1, 2):
+            line = '  '  # left padding
+            for col in range(-1, w + 1):
+                top = _is_black(col, row)
+                bottom = _is_black(col, row + 1)
+                if top and bottom:
+                    line += '\u2588'  # full block
+                elif top and not bottom:
+                    line += '\u2580'  # upper half
+                elif not top and bottom:
+                    line += '\u2584'  # lower half
+                else:
+                    line += ' '
+            lines.append(line)
+
+        print('\n'.join(lines))
     except Exception as e:
         print(f'   \u26a0\ufe0f  Could not render ASCII QR: {e}')
         print('   (Please scan the QR code in the browser window or the opened image)')
