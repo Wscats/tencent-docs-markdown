@@ -9,7 +9,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { loadCookies, isCookieValid, getCookieString, loginWithQRCode, COOKIE_FILE } = require('./auth');
+const { loadCookies, isCookieValid, loginWithQRCode, COOKIE_FILE } = require('./auth');
 
 const POLL_INTERVAL = 10000; // 10 seconds
 const MAX_POLLS = 18; // 18 * 10s = 180s max wait time
@@ -86,17 +86,6 @@ async function pollCookieStatus() {
       console.log('='.repeat(60));
       console.log(`   ✅ Cookies are valid (${cookies.length} cookies loaded)`);
       console.log(`   📁 Cookie file: ${COOKIE_FILE}`);
-
-      // Display key cookie names
-      const keyNames = ['TOK', 'uid', 'fingerprint', 'loginType'].filter(
-        (name) => cookies.some((c) => c.name === name)
-      );
-      if (keyNames.length > 0) {
-        console.log(`   🔑 Key cookies: ${keyNames.join(', ')}`);
-      }
-
-      const cookieStr = getCookieString(cookies);
-      console.log(`   📏 Cookie string length: ${cookieStr.length} chars`);
       console.log('='.repeat(60));
       console.log('\n✅ You are now logged in and ready to use Tencent Docs Markdown!\n');
       cleanup(0);

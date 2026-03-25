@@ -285,5 +285,15 @@ tencent-docs-markdown/
 - 默认 `domain_id` 为 `300000000`
 - XSRF Token 从 `TOK` Cookie 中提取
 - Cookies 存储在 `.cookies.json` 中（已加入 .gitignore）
+- **安全提示：** `.cookies.json` 包含敏感的会话 Cookie，请勿提交到版本控制或分享给他人，建议限制其文件权限（如 `chmod 600 .cookies.json`）
 - 删除操作会将文档移至回收站（可恢复）
 - 下载/读取/更新操作会自动解析 URL 中的标识符为真实 padId
+- 建议在受控或受信环境中运行此工具，因为 Puppeteer 会下载 Chromium 并使用浏览器自动化权限
+
+---
+
+## 所需配置
+
+| 配置项 | 路径 | 说明 |
+|--------|------|------|
+| Cookie 存储 | `.cookies.json`（项目根目录，自动生成） | 存储腾讯文档会话 Cookie，首次登录后自动创建。**此文件包含敏感信息，请勿泄露。** |
