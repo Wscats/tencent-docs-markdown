@@ -10,7 +10,10 @@
     "publish": "./publish.sh",
     "publish:patch": "./publish.sh patch",
     "publish:minor": "./publish.sh minor",
-    "publish:major": "./publish.sh major"
+    "publish:major": "./publish.sh major",
+    "lint": "eslint src --ext .ts,.tsx,.js,.jsx --fix",
+    "test": "jest --coverage",
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "axios": "^1.7.0",
