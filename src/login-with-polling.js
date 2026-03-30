@@ -1,3 +1,5 @@
+'use strict';
+
 /**
  * Login with Polling Script
  *

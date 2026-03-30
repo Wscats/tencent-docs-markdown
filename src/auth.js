@@ -1,3 +1,5 @@
+'use strict';
+
 /**
  * Tencent Docs Markdown Skill - Authentication Module
  *

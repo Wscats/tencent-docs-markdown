@@ -13,7 +13,10 @@
     "publish:major": "./publish.sh major",
     "lint": "eslint src --ext .ts,.tsx,.js,.jsx --fix",
     "test": "jest --coverage",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "lint:check": "eslint . --ext .ts,.tsx,.js,.jsx",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "axios": "^1.7.0",
@@ -23,7 +26,21 @@
     "puppeteer": "^22.0.0"
   },
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=18.0.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "keywords": [
+    "tencent",
+    "docs",
+    "markdown"
+  ],
+  "author": "wscats (https://github.com/wscats)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wscats/tencent-docs-markdown.git"
+  },
+  "bugs": {
+    "url": "https://github.com/wscats/tencent-docs-markdown/issues"
+  },
+  "homepage": "https://github.com/wscats/tencent-docs-markdown#readme"
 }
