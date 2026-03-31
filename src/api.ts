@@ -11,18 +11,49 @@
  * - Get document info
  */
 
-const axios = require('axios');
-const qs = require('querystring');
-const { getCookieString, getXsrfToken } = require('./auth');
+import axios from 'axios';
+import * as qs from 'querystring';
+import { getCookieString, getXsrfToken } from './auth';
+import type { CookieEntry } from './auth';
 
-const BASE_URL = 'https://docs.qq.com';
-const DEFAULT_DOMAIN_ID = '300000000';
-const DOC_TYPE_MARKDOWN = 14;
+export const BASE_URL = 'https://docs.qq.com';
+export const DEFAULT_DOMAIN_ID = '300000000';
+export const DOC_TYPE_MARKDOWN = 14;
+
+/** Result returned by createDocument. */
+export interface CreateDocumentResult {
+  docUrl: string;
+  padId: string;
+  globalPadId: string;
+  title: string;
+  raw: Record<string, unknown>;
+}
+
+/** Result returned by resolveRealPadId. */
+export interface ResolvedPadInfo {
+  padId: string;
+  globalPadId: string;
+  title: string;
+}
+
+/** Common API response shape. */
+interface ApiResponse {
+  retcode: number;
+  ret?: number;
+  msg?: string;
+  error_msg?: string;
+  doc_id?: { pad_id?: string };
+  docId?: { pad_id?: string };
+  doc_url?: string;
+  docUrl?: string;
+  global_pad_id?: string;
+  result?: { mark_down?: string };
+}
 
 /**
- * Create common HTTP headers for API requests
+ * Create common HTTP headers for API requests.
  */
-function getHeaders(cookies) {
+function getHeaders(cookies: CookieEntry[]): Record<string, string> {
   return {
     Cookie: getCookieString(cookies),
     Referer: `${BASE_URL}/`,
@@ -33,17 +64,17 @@ function getHeaders(cookies) {
 }
 
 /**
- * Create a new Markdown document on Tencent Docs
+ * Create a new Markdown document on Tencent Docs.
  *
- * The real API uses query string parameters (not POST body).
- * Key params: create_type=1, doc_type=14, folder_id=/, hum=1
- *
- * @param {Array} cookies - Session cookies
- * @param {string} title - Document title
- * @param {string} [folderId='/'] - Target folder ID ('/' for root)
- * @returns {object} - { docUrl, padId, globalPadId }
+ * @param cookies - Session cookies
+ * @param title - Document title
+ * @param folderId - Target folder ID ('/' for root)
  */
-async function createDocument(cookies, title, folderId = '/') {
+export async function createDocument(
+  cookies: CookieEntry[],
+  title: string,
+  folderId: string = '/',
+): Promise<CreateDocumentResult> {
   const xsrf = getXsrfToken(cookies);
   const params = qs.stringify({
     create_type: 1,
@@ -57,7 +88,7 @@ async function createDocument(cookies, title, folderId = '/') {
 
   const url = `${BASE_URL}/cgi-bin/online_docs/createdoc_new?${params}`;
 
-  const resp = await axios.get(url, {
+  const resp = await axios.get<ApiResponse>(url, {
     headers: {
       ...getHeaders(cookies),
       Accept: 'application/json, text/plain, */*',
@@ -79,18 +110,17 @@ async function createDocument(cookies, title, folderId = '/') {
     padId,
     globalPadId,
     title,
-    raw: result,
+    raw: result as unknown as Record<string, unknown>,
   };
 }
 
 /**
- * Delete a Markdown document (move to trash)
+ * Delete a Markdown document (move to trash).
  *
- * @param {Array} cookies - Session cookies
- * @param {string} padId - Document pad ID
- * @returns {object} - API response
+ * @param cookies - Session cookies
+ * @param padId - Document pad ID
  */
-async function deleteDocument(cookies, padId) {
+export async function deleteDocument(cookies: CookieEntry[], padId: string): Promise<ApiResponse> {
   const xsrf = getXsrfToken(cookies);
   const data = qs.stringify({
     domain_id: DEFAULT_DOMAIN_ID,
@@ -100,7 +130,7 @@ async function deleteDocument(cookies, padId) {
     xsrf,
   });
 
-  const resp = await axios.post(`${BASE_URL}/cgi-bin/online_docs/doc_delete`, data, {
+  const resp = await axios.post<ApiResponse>(`${BASE_URL}/cgi-bin/online_docs/doc_delete`, data, {
     headers: {
       ...getHeaders(cookies),
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -117,17 +147,16 @@ async function deleteDocument(cookies, padId) {
 }
 
 /**
- * Read Markdown document content
+ * Read Markdown document content.
  *
- * @param {Array} cookies - Session cookies
- * @param {string} fileId - Global pad ID (e.g. "300000000$xxxxx")
- * @returns {string} - Markdown text content
+ * @param cookies - Session cookies
+ * @param fileId - Global pad ID (e.g. "300000000$xxxxx")
  */
-async function readDocument(cookies, fileId) {
+export async function readDocument(cookies: CookieEntry[], fileId: string): Promise<string> {
   const xsrf = getXsrfToken(cookies);
   const url = `${BASE_URL}/api/markdown/read/data?xsrf=${xsrf}`;
 
-  const resp = await axios.post(
+  const resp = await axios.post<ApiResponse>(
     url,
     { file_id: fileId },
     {
@@ -136,13 +165,13 @@ async function readDocument(cookies, fileId) {
         'Content-Type': 'application/json',
       },
       timeout: 30000,
-    }
+    },
   );
 
   const result = resp.data;
   if (result.retcode !== 0) {
     throw new Error(
-      `Failed to read document: ${result.msg || result.error_msg || `retcode=${result.retcode}`}`
+      `Failed to read document: ${result.msg || result.error_msg || `retcode=${result.retcode}`}`,
     );
   }
 
@@ -150,18 +179,21 @@ async function readDocument(cookies, fileId) {
 }
 
 /**
- * Write/update Markdown document content
+ * Write/update Markdown document content.
  *
- * @param {Array} cookies - Session cookies
- * @param {string} fileId - Global pad ID (e.g. "300000000$xxxxx")
- * @param {string} markdownText - Markdown content to write
- * @returns {object} - API response
+ * @param cookies - Session cookies
+ * @param fileId - Global pad ID (e.g. "300000000$xxxxx")
+ * @param markdownText - Markdown content to write
  */
-async function writeDocument(cookies, fileId, markdownText) {
+export async function writeDocument(
+  cookies: CookieEntry[],
+  fileId: string,
+  markdownText: string,
+): Promise<ApiResponse> {
   const xsrf = getXsrfToken(cookies);
   const url = `${BASE_URL}/api/markdown/write/data?xsrf=${xsrf}`;
 
-  const resp = await axios.post(
+  const resp = await axios.post<ApiResponse>(
     url,
     {
       file_id: fileId,
@@ -173,13 +205,13 @@ async function writeDocument(cookies, fileId, markdownText) {
         'Content-Type': 'application/json',
       },
       timeout: 30000,
-    }
+    },
   );
 
   const result = resp.data;
   if (result.retcode !== 0) {
     throw new Error(
-      `Failed to write document: ${result.msg || result.error_msg || `retcode=${result.retcode}`}`
+      `Failed to write document: ${result.msg || result.error_msg || `retcode=${result.retcode}`}`,
     );
   }
 
@@ -187,13 +219,15 @@ async function writeDocument(cookies, fileId, markdownText) {
 }
 
 /**
- * Get document metadata/info
+ * Get document metadata/info.
  *
- * @param {Array} cookies - Session cookies
- * @param {string} docId - Document hash ID (from URL)
- * @returns {object} - Document info
+ * @param cookies - Session cookies
+ * @param docId - Document hash ID (from URL)
  */
-async function getDocumentInfo(cookies, docId) {
+export async function getDocumentInfo(
+  cookies: CookieEntry[],
+  docId: string,
+): Promise<Record<string, unknown>> {
   const xsrf = getXsrfToken(cookies);
   const url = `${BASE_URL}/cgi-bin/online_docs/doc_info?xsrf=${xsrf}`;
 
@@ -206,24 +240,26 @@ async function getDocumentInfo(cookies, docId) {
         'Content-Type': 'application/json',
       },
       timeout: 30000,
-    }
+    },
   );
 
-  return resp.data;
+  return resp.data as Record<string, unknown>;
 }
 
 /**
- * Rename a document
+ * Rename a document.
  *
- * @param {Array} cookies - Session cookies
- * @param {string} padId - Document pad ID
- * @param {string} newTitle - New document title
- * @returns {object} - API response
+ * @param cookies - Session cookies
+ * @param padId - Document pad ID
+ * @param newTitle - New document title
  */
-async function renameDocument(cookies, padId, newTitle) {
+export async function renameDocument(
+  cookies: CookieEntry[],
+  padId: string,
+  newTitle: string,
+): Promise<ApiResponse> {
   const xsrf = getXsrfToken(cookies);
 
-  // The real API passes all parameters via URL query string
   const params = qs.stringify({
     pad_id: padId,
     domain_id: DEFAULT_DOMAIN_ID,
@@ -235,11 +271,10 @@ async function renameDocument(cookies, padId, newTitle) {
 
   const url = `${BASE_URL}/cgi-bin/online_docs/doc_changetitle?${params}`;
 
-  // Body is an empty multipart/form-data (matching the real browser request)
   const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
   const body = `--${boundary}--\r\n`;
 
-  const resp = await axios.post(url, body, {
+  const resp = await axios.post<ApiResponse>(url, body, {
     headers: {
       ...getHeaders(cookies),
       Accept: 'application/json, text/plain, */*',
@@ -257,22 +292,17 @@ async function renameDocument(cookies, padId, newTitle) {
 }
 
 /**
- * Parse document URL to extract the URL hash identifier
+ * Parse document URL to extract the URL hash identifier.
  *
  * Note: The URL hash (e.g. "DSFdDdHBqa2ZESUNw") is NOT the real padId.
  * Use resolveRealPadId() to get the actual padId from the document page.
  *
- * @param {string} url - Tencent Docs Markdown URL (e.g. "https://docs.qq.com/markdown/xxxxx")
- * @returns {string} - Extracted URL hash identifier
+ * @param url - Tencent Docs Markdown URL
  */
-function parsePadIdFromUrl(url) {
-  // Handle URLs like:
-  // https://docs.qq.com/markdown/DQxxxxx
-  // //docs.qq.com/markdown/DQxxxxx
+export function parsePadIdFromUrl(url: string): string {
   const match = url.match(/\/markdown\/([A-Za-z0-9]+)/);
-  if (match) return match[1];
+  if (match) return match[1]!;
 
-  // Handle other URL patterns
   const parts = url.split('/').filter(Boolean);
   return parts[parts.length - 1] || '';
 }
@@ -280,30 +310,28 @@ function parsePadIdFromUrl(url) {
 /**
  * Resolve the real padId by fetching the document page and parsing basicClientVars.
  *
- * The URL hash identifier (from parsePadIdFromUrl) differs from the actual padId
- * used by the read/write APIs. This function fetches the document HTML page and
- * extracts the real padId from the embedded basicClientVars JSON.
- *
- * @param {Array} cookies - Session cookies
- * @param {string} docUrl - Full Tencent Docs Markdown URL
- * @returns {object} - { padId, globalPadId, title }
+ * @param cookies - Session cookies
+ * @param docUrl - Full Tencent Docs Markdown URL
  */
-async function resolveRealPadId(cookies, docUrl) {
-  // Security: Validate that docUrl targets an allowed hostname before attaching cookies
+export async function resolveRealPadId(
+  cookies: CookieEntry[],
+  docUrl: string,
+): Promise<ResolvedPadInfo> {
+  // Security: Validate that docUrl targets an allowed hostname
   const ALLOWED_DOC_HOSTNAMES = ['docs.qq.com'];
   try {
     const parsedDocUrl = new URL(docUrl);
     if (!ALLOWED_DOC_HOSTNAMES.includes(parsedDocUrl.hostname)) {
       throw new Error(
-        `Security: Blocked cookie transmission to unauthorized hostname: ${parsedDocUrl.hostname}. Only docs.qq.com is allowed.`
+        `Security: Blocked cookie transmission to unauthorized hostname: ${parsedDocUrl.hostname}. Only docs.qq.com is allowed.`,
       );
     }
   } catch (err) {
-    if (err.message.startsWith('Security:')) throw err;
+    if (err instanceof Error && err.message.startsWith('Security:')) throw err;
     throw new Error(`Invalid docUrl: ${docUrl}`);
   }
 
-  const resp = await axios.get(docUrl, {
+  const resp = await axios.get<string>(docUrl, {
     headers: {
       ...getHeaders(cookies),
       Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -314,25 +342,24 @@ async function resolveRealPadId(cookies, docUrl) {
 
   const html = resp.data;
 
-  // Extract base64-encoded basicClientVars from the page
   const match = html.match(/atob\('([^']+)'\)/);
   if (!match) {
     throw new Error('Cannot extract basicClientVars from document page');
   }
 
-  const decoded = Buffer.from(match[1], 'base64').toString('utf-8');
-  const clientVars = JSON.parse(decoded);
+  const decoded = Buffer.from(match[1]!, 'base64').toString('utf-8');
+  const clientVars = JSON.parse(decoded) as Record<string, any>;
 
   const padInfo = clientVars?.docInfo?.padInfo;
   if (!padInfo || !padInfo.padId) {
     throw new Error('Cannot find padId in basicClientVars');
   }
 
-  const padId = padInfo.padId;
-  const domainId = padInfo.domainId || DEFAULT_DOMAIN_ID;
+  const padId: string = padInfo.padId;
+  const domainId: string = padInfo.domainId || DEFAULT_DOMAIN_ID;
   const separator = '$';
   const globalPadId = domainId + separator + padId;
-  const title = padInfo.padTitle || '';
+  const title: string = padInfo.padTitle || '';
 
   return { padId, globalPadId, title };
 }

@@ -6,35 +6,32 @@
  * Launches QR code login and polls every 10 seconds to check
  * whether cookies have been obtained and are valid.
  *
- * Usage: node src/login-with-polling.js
+ * Usage: node src/login-with-polling.ts
  */
 
-const fs = require('fs');
-const path = require('path');
-const { loadCookies, isCookieValid, loginWithQRCode, COOKIE_FILE } = require('./auth');
+import * as fs from 'fs';
+import { loadCookies, isCookieValid, loginWithQRCode, COOKIE_FILE } from './auth';
 
 const POLL_INTERVAL = 10000; // 10 seconds
 const MAX_POLLS = 18; // 18 * 10s = 180s max wait time
 
 let pollCount = 0;
-let pollTimer = null;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
 let loginSucceeded = false;
 
 /**
- * Start the auth.js login process by directly calling the exported function.
- * This avoids spawning a child process (no child_process usage).
+ * Start the auth login process by directly calling the exported function.
  */
-function startLoginProcess() {
+function startLoginProcess(): void {
   console.log('🚀 Starting QR code login process...');
   console.log('   A browser window will open shortly. Please scan the QR code.\n');
 
-  // Call loginWithQRCode directly instead of spawning a child process
   loginWithQRCode()
-    .then((cookies) => {
+    .then(() => {
       loginSucceeded = true;
       console.log('\n✅ Login process completed successfully.');
     })
-    .catch((err) => {
+    .catch((err: Error) => {
       if (!loginSucceeded) {
         console.error(`❌ Login process failed: ${err.message}`);
       }
@@ -42,9 +39,9 @@ function startLoginProcess() {
 }
 
 /**
- * Poll to check if cookies have been obtained and are valid
+ * Poll to check if cookies have been obtained and are valid.
  */
-async function pollCookieStatus() {
+async function pollCookieStatus(): Promise<void> {
   pollCount++;
   const elapsed = pollCount * (POLL_INTERVAL / 1000);
 
@@ -59,7 +56,7 @@ async function pollCookieStatus() {
       cleanup(1);
       return;
     }
-    return; // Continue polling
+    return;
   }
 
   // Step 2: Cookie file exists - try to load it
@@ -71,7 +68,7 @@ async function pollCookieStatus() {
       cleanup(1);
       return;
     }
-    return; // Continue polling
+    return;
   }
 
   console.log(`   📂 Cookie file found! Contains ${cookies.length} cookies.`);
@@ -96,13 +93,14 @@ async function pollCookieStatus() {
       console.log('   ⚠️  Cookies exist but validation failed. May still be logging in...');
       if (pollCount >= MAX_POLLS) {
         console.log('\n⏰ Timeout reached. Cookies could not be validated.');
-        console.log('   Try running: node src/auth.js --force');
+        console.log('   Try running: node src/auth.ts --force');
         cleanup(1);
         return;
       }
     }
   } catch (err) {
-    console.log(`   ❌ Validation error: ${err.message}`);
+    const message = err instanceof Error ? err.message : String(err);
+    console.log(`   ❌ Validation error: ${message}`);
     if (pollCount >= MAX_POLLS) {
       cleanup(1);
       return;
@@ -111,9 +109,9 @@ async function pollCookieStatus() {
 }
 
 /**
- * Cleanup and exit
+ * Cleanup and exit.
  */
-function cleanup(exitCode = 0) {
+function cleanup(exitCode: number = 0): void {
   if (pollTimer) {
     clearInterval(pollTimer);
     pollTimer = null;
@@ -122,9 +120,9 @@ function cleanup(exitCode = 0) {
 }
 
 /**
- * Main entry point
+ * Main entry point.
  */
-async function main() {
+async function main(): Promise<void> {
   console.log('='.repeat(60));
   console.log('  Tencent Docs Markdown - Login with Polling');
   console.log('  Poll interval: 10s | Max wait: 180s');
@@ -151,12 +149,12 @@ async function main() {
   // Start polling every 10 seconds
   console.log(`\n⏱️  Starting cookie polling (every ${POLL_INTERVAL / 1000}s)...\n`);
 
-  // First poll after 10 seconds
   pollTimer = setInterval(async () => {
     try {
       await pollCookieStatus();
     } catch (err) {
-      console.error(`   Polling error: ${err.message}`);
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`   Polling error: ${message}`);
     }
   }, POLL_INTERVAL);
 
@@ -171,7 +169,7 @@ async function main() {
   });
 }
 
-main().catch((err) => {
+main().catch((err: Error) => {
   console.error(`Fatal error: ${err.message}`);
   cleanup(1);
 });
