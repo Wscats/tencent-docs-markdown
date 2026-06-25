@@ -184,7 +184,15 @@ node src/index.js info https://docs.qq.com/markdown/DQxxxxxxxx
 ```javascript
 const { handleInfo } = require('./src/index');
 const info = await handleInfo('https://docs.qq.com/markdown/DQxxxxxxxx');
+// info: 完整 doc_meta (title / creator_uid / last_modify_ts / doc_type ...)
+// info.resolved: { padId, globalPadId, title }
 ```
+
+> **修复历史：** v1.1.x 之前 `info` 命令总是返回 `retcode=11607 (参数错误)`。
+> 根因有二：① `handleInfo` 用了 URL 标识符（DSxxx）而非真实 padId；
+> ② 底层 `getDocumentInfo` 用错了 API 签名（POST + `xsrf` + `{file_id}` body），
+> 正确签名是 `GET /doc_info?u=&domainId=...&localPadId=...&getCollected=1`。
+> 本仓库已修复（见 `src/api.js` 注释 + `src/index.js` `handleInfo`）。
 
 ### 9. 登录
 

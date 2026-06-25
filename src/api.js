@@ -187,25 +187,35 @@ async function writeDocument(cookies, fileId, markdownText) {
 /**
  * Get document metadata/info
  *
+ * NOTE: The original implementation used `POST` with `{ file_id }` body,
+ * which always returned retcode=11607 (参数错误). Real browser requests use
+ * `GET` with `domainId` + `localPadId` query params. See trace_info.mjs.
+ *
  * @param {Array} cookies - Session cookies
- * @param {string} docId - Document hash ID (from URL)
+ * @param {string} docIdOrGlobalPadId - Either padId (e.g. "VHXsjrSZnkqx")
+ *   or globalPadId (e.g. "300000000$VHXsjrSZnkqx"). When a globalPadId is
+ *   passed we split out the localPadId and domainId automatically.
  * @returns {object} - Document info
  */
-async function getDocumentInfo(cookies, docId) {
-  const xsrf = getXsrfToken(cookies);
-  const url = `${BASE_URL}/cgi-bin/online_docs/doc_info?xsrf=${xsrf}`;
+async function getDocumentInfo(cookies, docIdOrGlobalPadId) {
+  // Parse globalPadId if provided in the form "{domainId}${padId}"
+  let domainId = DEFAULT_DOMAIN_ID;
+  let localPadId = docIdOrGlobalPadId;
+  if (docIdOrGlobalPadId && docIdOrGlobalPadId.includes('$')) {
+    const [dId, pId] = docIdOrGlobalPadId.split('$');
+    domainId = dId;
+    localPadId = pId;
+  }
 
-  const resp = await axios.post(
-    url,
-    { file_id: docId },
-    {
-      headers: {
-        ...getHeaders(cookies),
-        'Content-Type': 'application/json',
-      },
-      timeout: 30000,
-    }
-  );
+  const url = `${BASE_URL}/cgi-bin/online_docs/doc_info?u=&domainId=${domainId}&localPadId=${localPadId}&getCollected=1`;
+
+  const resp = await axios.get(url, {
+    headers: {
+      ...getHeaders(cookies),
+      'Accept': 'application/json, text/plain, */*',
+    },
+    timeout: 30000,
+  });
 
   return resp.data;
 }

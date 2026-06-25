@@ -268,16 +268,22 @@ async function handleInfo(docUrl) {
   const spinner = ora('Getting document info...').start();
   try {
     const cookies = await ensureLogin();
-    const padId = parsePadIdFromUrl(docUrl);
 
-    if (!padId) {
-      throw new Error(`Cannot parse document ID from URL: ${docUrl}`);
-    }
+    // Resolve the real padId from the document page
+    // (URL hash identifier differs from the actual padId used by APIs)
+    spinner.text = 'Resolving document ID...';
+    const docMeta = await resolveRealPadId(cookies, docUrl);
+    const { globalPadId, padId, title: resolvedTitle } = docMeta;
 
-    const info = await getDocumentInfo(cookies, padId);
+    const info = await getDocumentInfo(cookies, globalPadId);
     spinner.succeed(chalk.green('Document info retrieved.'));
-    console.log(JSON.stringify(info, null, 2));
-    return info;
+    // Merge in resolved metadata for caller convenience
+    const enriched = {
+      ...info,
+      resolved: { padId, globalPadId, title: resolvedTitle },
+    };
+    console.log(JSON.stringify(enriched, null, 2));
+    return enriched;
   } catch (err) {
     spinner.fail(chalk.red(`Info failed: ${err.message}`));
     throw err;
